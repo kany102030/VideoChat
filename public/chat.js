@@ -1,30 +1,152 @@
+const socket = io.connect("http://localhost:4000")
 const divVideoChatLobby = document.querySelector('#video-chat-lobby')
 const divVideoChat = document.querySelector('#video-chat-room')
 const joinButton = document.querySelector('#join')
 const userVideo = document.querySelector('#user-video')
 const peerVideo = document.querySelector('#peer-video')
 const roomInput = document.querySelector('#roomName')
-
+let creator = false
+let roomName = ''
+let userStream
+//stun url 前面必須加stun:
+//turn url 前面必須加turn:
+const iceServers = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+}
+let rtcPeerConnection;
 joinButton.addEventListener('click', function (event) {
   console.log(event)
   if (roomInput.value === "") {
     alert("Please enter a room name")
   } else {
-    navigator.getUserMedia({
-      audio: true,
-      video: true,
-      //use default
-      //video: { width: 1280, height: 720 },
-    },
-      function successGetMedia(stream) {
-        divVideoChatLobby.style = "display:none"
-        userVideo.srcObject = stream
-        userVideo.onloadedmetadata = function (e) {
-          userVideo.play()
-        }
+    roomName = roomInput.value
+    socket.emit("join", roomName)
+  }
+})
+
+socket.on('created', function () {
+  creator = true
+
+  navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: true,
+    //use default
+    //video: { width: 1280, height: 720 },
+  })
+    .then(function (stream) {
+      userStream = stream
+      divVideoChatLobby.style = "display:none"
+      userVideo.srcObject = stream
+      userVideo.onloadedmetadata = function (e) {
+        userVideo.play()
+      }
+    })
+    .catch(function () {
+      alert("Couldn't access user media")
+    })
+})
+socket.on('joined', function () {
+  creator = false
+  navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: true,
+    //use default
+    //video: { width: 1280, height: 720 },
+  })
+    .then(function (stream) {
+      userStream = stream
+      divVideoChatLobby.style = "display:none"
+      userVideo.srcObject = stream
+      userVideo.onloadedmetadata = function (e) {
+        userVideo.play()
+      }
+      socket.emit('ready', roomName)
+    })
+    .catch(function () {
+      alert("Couldn't access user media")
+    })
+})
+socket.on('full', function () {
+  alert('Room is full, Cannot join.')
+})
+
+
+socket.on('ready', function () {
+  if (creator) {
+    console.log('get ready')
+    rtcPeerConnection = new RTCPeerConnection(iceServers)
+    // everytime get iceCandidate
+    rtcPeerConnection.onicecandidate = OnIceCandidateFunction
+    // everytime get stream data from the otherside
+    rtcPeerConnection.ontrack = OnTrackFunction
+    // add audio track to the ouput stream
+    rtcPeerConnection.addTrack(userStream.getTracks()[0], userStream)
+    // add video track to the output stream
+    // the output stream will in the peerside OnTrackFunction
+    // rtcPeerConnection.addTrack(userStream.getTracks()[1], userStream)
+
+    rtcPeerConnection.createOffer(
+      function (offer) {
+        // set the local description for creator
+        rtcPeerConnection.setLocalDescription(offer)
+        socket.emit('offer', offer, roomName)
       },
-      function failGetMedia() {
-        alert("Couldn't access user media")
+      function (error) {
+        console.log(error)
+      })
+
+
+  }
+})
+socket.on('candidate', function (candidate) {
+  console.log('get candidate')
+  const iceCandidate = new RTCIceCandidate(candidate)
+  rtcPeerConnection.addIceCandidate(iceCandidate)
+})
+socket.on('offer', function (offer) {
+  if (!creator) {
+    rtcPeerConnection = new RTCPeerConnection(iceServers)
+    // everytime get iceCandidate
+    rtcPeerConnection.onicecandidate = OnIceCandidateFunction
+    // everytime get stream data from the otherside
+    rtcPeerConnection.ontrack = OnTrackFunction
+    // add audio track to the ouput stream
+    rtcPeerConnection.addTrack(userStream.getTracks()[0], userStream)
+    // add video track to the output stream
+    // the output stream will in the peerside OnTrackFunction
+    // rtcPeerConnection.addTrack(userStream.getTracks()[1], userStream)
+
+    // set the remote description from creator
+    rtcPeerConnection.setRemoteDescription(offer)
+
+    rtcPeerConnection.createAnswer(
+      function (answer) {
+        // set the local description for joiner
+        rtcPeerConnection.setLocalDescription(answer)
+        socket.emit('answer', answer, roomName)
+      },
+      function (error) {
+        console.log(error)
       })
   }
 })
+socket.on('answer', function (answer) {
+  // set the remote description from joiner
+  rtcPeerConnection.setRemoteDescription(answer)
+})
+
+function OnIceCandidateFunction(event) {
+  if (event.candidate) {
+    socket.emit('candidate', event.candidate, roomName)
+  }
+}
+function OnTrackFunction(event) {
+  //event.streams has a stream list [video stream, audio stream]
+  peerVideo.srcObject = event.streams[0]
+  peerVideo.onloadedmetadata = function (e) {
+    peerVideo.play()
+  }
+}
