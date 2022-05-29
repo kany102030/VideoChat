@@ -40,10 +40,15 @@ io.on('connection', function (socket) {
     socket.broadcast.to(roomName).emit('candidate', canditate)
   })
   socket.on('offer', function (offer, roomName) {
-    console.log('offer', offer)
+    console.log('offer')
     socket.broadcast.to(roomName).emit('offer', offer)
   })
   socket.on('answer', function (answer, roomName) {
+    console.log('answer')
     socket.broadcast.to(roomName).emit('answer', answer)
+  })
+  socket.on('leave', function (roomName) {
+    socket.leave(roomName)
+    socket.broadcast.to(roomName).emit('leave')
   })
 })
